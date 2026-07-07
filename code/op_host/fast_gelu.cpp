@@ -10,7 +10,7 @@ constexpr uint32_t CORE_SPLIT_ELEM_NUM = 2048;
 constexpr uint32_t TILE_ELEM_NUM = 8192;
 constexpr uint32_t FLOAT_TILE_ELEM_NUM = 4096;
 constexpr uint32_t HALF_TILE_ELEM_NUM = 8192;
-constexpr uint32_t LARGE_CORE_THRESHOLD = CORE_SPLIT_ELEM_NUM * 4;
+constexpr uint32_t LARGE_CORE_THRESHOLD = CORE_SPLIT_ELEM_NUM * 3;
 
 namespace optiling {
     static uint32_t GetDataTypeSize(ge::DataType dtype) {

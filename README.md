@@ -6,11 +6,11 @@ This repository tracks the FastGelu custom CANN operator solution and every impo
 
 Current best version:
 
-- Commit: `a31de5d` / `v6_dtype_f4096_h8192_thr4_buf2`
-- CANNJudge submission: `85216`
+- Commit: current commit / `manual_dtype_f4096_h8192_thr3_buf2`
+- CANNJudge submission: `85408`
 - Result: Pass `5/5`
-- Times: `4.14 / 3.38 / 6.40 / 6.92 / 7.92 us`
-- Sum: `28.76 us`
+- Times: `4.22 / 3.38 / 6.32 / 6.66 / 7.98 us`
+- Sum: `28.56 us`
 
 ## Version History
 
@@ -24,6 +24,7 @@ Current best version:
 | `1f41134` | V3 + sigmoid | Combined V3 tiling with `x * sigmoid(1.702x)` | `85028` | `3.92 / 3.74 / 6.98 / 6.46 / 8.70` | `29.80` | Pass 5/5 |
 | `12525cc` | V5 hybrid generalized sigmoid | V3 small-input core policy plus 32B generalized big/small core distribution and 4096-element sigmoid tiles | `85101` | `3.52 / 3.90 / 6.72 / 7.38 / 8.18` | `29.70` | Pass 5/5 |
 | `a31de5d` | V6 dtype-aware tile | Float32 keeps 4096 tile; float16 uses 8192 tile to reach about 16KB copy chunks | `85216` | `4.14 / 3.38 / 6.40 / 6.92 / 7.92` | `28.76` | Pass 5/5 |
+| current commit | V7 lower large-core threshold | Kept V6 dtype-aware tiles and lowered `LARGE_CORE_THRESHOLD` from `CORE_SPLIT_ELEM_NUM * 4` to `* 3` | `85408` | `4.22 / 3.38 / 6.32 / 6.66 / 7.98` | `28.56` | Pass 5/5 |
 
 Documentation and automation commits:
 
@@ -40,6 +41,7 @@ Main lessons so far:
 - Formula simplification to `x * sigmoid(1.702x)` is a large win.
 - V3's small-input core policy is better for some small/mid tests than blindly opening many cores.
 - Generalized 32B big/small core tiling helps larger cases, but can hurt some tests if the tile size is not matched to dtype.
+- Lowering the large-core threshold from `CORE_SPLIT_ELEM_NUM * 4` to `* 3` improved the slowest larger cases enough to beat V6, while `* 2` and `* 5 / 2` regressed.
 - Based on the CANN performance skill, single copy chunks around `16KB` are a useful target:
   - float32 `4096` elements = `16KB`
   - float16 `8192` elements = `16KB`
