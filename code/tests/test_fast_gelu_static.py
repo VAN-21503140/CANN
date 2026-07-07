@@ -45,15 +45,10 @@ class FastGeluStaticTests(unittest.TestCase):
     def test_kernel_implements_fast_gelu_vector_formula(self):
         kernel = read(KERNEL)
         for token in [
-            "Abs(",
             "Muls(",
-            "Exp(",
-            "Adds(",
-            "Sub(",
+            "Sigmoid(",
             "Mul(",
-            "Div(",
-            "-1.702",
-            "0.851",
+            "1.702",
         ]:
             self.assertIn(token, kernel)
 
