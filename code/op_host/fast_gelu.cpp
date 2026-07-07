@@ -7,12 +7,18 @@
 
 constexpr uint32_t BLOCK_SIZE = 32;
 constexpr uint32_t CORE_SPLIT_ELEM_NUM = 2048;
-constexpr uint32_t TILE_ELEM_NUM = 4096;
+constexpr uint32_t TILE_ELEM_NUM = 8192;
+constexpr uint32_t FLOAT_TILE_ELEM_NUM = 4096;
+constexpr uint32_t HALF_TILE_ELEM_NUM = 8192;
 constexpr uint32_t LARGE_CORE_THRESHOLD = CORE_SPLIT_ELEM_NUM * 4;
 
 namespace optiling {
     static uint32_t GetDataTypeSize(ge::DataType dtype) {
         return dtype == ge::DT_FLOAT16 ? 2U : 4U;
+    }
+
+    static uint32_t GetTileElemNum(ge::DataType dtype) {
+        return dtype == ge::DT_FLOAT16 ? HALF_TILE_ELEM_NUM : FLOAT_TILE_ELEM_NUM;
     }
 
     static ge::graphStatus TilingFunc(gert::TilingContext *context) {
@@ -22,6 +28,7 @@ namespace optiling {
         ge::DataType dtype_x = tensor_x->GetDataType();
         uint32_t length_x = static_cast<uint32_t>(tensor_x->GetShapeSize());
         uint32_t type_length = GetDataTypeSize(dtype_x);
+        uint32_t tile_elem_num = GetTileElemNum(dtype_x);
 
         uint32_t DT_X = static_cast<uint32_t>(dtype_x);
         ASCENDC_TPL_SEL_PARAM(context, DT_X);
@@ -53,7 +60,7 @@ namespace optiling {
 
         uint32_t base_block_num = block_dim > 0 ? total_block_num / block_dim : 0U;
         uint32_t tail_block_num = block_dim > 0 ? total_block_num % block_dim : 0U;
-        uint32_t tile_block_num = (TILE_ELEM_NUM * type_length) / BLOCK_SIZE;
+        uint32_t tile_block_num = (tile_elem_num * type_length) / BLOCK_SIZE;
         if (tile_block_num == 0) {
             tile_block_num = 1;
         }
@@ -66,9 +73,9 @@ namespace optiling {
             base_block_num == 0
                 ? 0U
                 : ((base_block_num % tile_block_num) == 0 ? small_tile_num : small_tile_num + 1U);
-        uint32_t small_tail_data_num = small_core_data_num - TILE_ELEM_NUM * small_tile_num;
+        uint32_t small_tail_data_num = small_core_data_num - tile_elem_num * small_tile_num;
         if (small_tail_data_num == 0 && final_small_tile_num > 0) {
-            small_tail_data_num = TILE_ELEM_NUM;
+            small_tail_data_num = tile_elem_num;
         }
 
         uint32_t big_block_num = base_block_num + 1U;
@@ -77,16 +84,16 @@ namespace optiling {
             big_block_num == 0
                 ? 0U
                 : ((big_block_num % tile_block_num) == 0 ? big_tile_num : big_tile_num + 1U);
-        uint32_t big_tail_data_num = big_core_data_num - TILE_ELEM_NUM * big_tile_num;
+        uint32_t big_tail_data_num = big_core_data_num - tile_elem_num * big_tile_num;
         if (big_tail_data_num == 0 && final_big_tile_num > 0) {
-            big_tail_data_num = TILE_ELEM_NUM;
+            big_tail_data_num = tile_elem_num;
         }
 
         tiling->smallCoreDataNum = small_core_data_num;
         tiling->bigCoreDataNum = big_core_data_num;
         tiling->finalBigTileNum = final_big_tile_num;
         tiling->finalSmallTileNum = final_small_tile_num;
-        tiling->tileDataNum = TILE_ELEM_NUM;
+        tiling->tileDataNum = tile_elem_num;
         tiling->smallTailDataNum = small_tail_data_num;
         tiling->bigTailDataNum = big_tail_data_num;
         tiling->tailBlockNum = tail_block_num;

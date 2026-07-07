@@ -5,7 +5,7 @@
 #include "tiling_key_fast_gelu.h"
 
 constexpr int32_t BUFFER_NUM = 2;
-constexpr uint32_t TILE_ELEM_NUM = 4096;
+constexpr uint32_t TILE_ELEM_NUM = 8192;
 
 template <class DT_X>
 class KernelFastGelu {
