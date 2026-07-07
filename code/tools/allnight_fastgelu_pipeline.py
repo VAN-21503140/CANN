@@ -80,14 +80,34 @@ def apply_candidate(base_files: dict[str, str], cand: Candidate) -> dict[str, st
     if cand.kind == "dtype_tile":
         host = replace_one(
             r"constexpr uint32_t TILE_ELEM_NUM = \d+;",
-            (
-                f"constexpr uint32_t TILE_ELEM_NUM = {max(cand.tile, cand.half_tile or cand.tile)};\n"
-                f"constexpr uint32_t FLOAT_TILE_ELEM_NUM = {cand.tile};\n"
-                f"constexpr uint32_t HALF_TILE_ELEM_NUM = {cand.half_tile};"
-            ),
+            f"constexpr uint32_t TILE_ELEM_NUM = {max(cand.tile, cand.half_tile or cand.tile)};",
             host,
             "host dtype-aware TILE_ELEM_NUM",
         )
+        if "constexpr uint32_t FLOAT_TILE_ELEM_NUM" in host:
+            host = replace_one(
+                r"constexpr uint32_t FLOAT_TILE_ELEM_NUM = \d+;",
+                f"constexpr uint32_t FLOAT_TILE_ELEM_NUM = {cand.tile};",
+                host,
+                "host FLOAT_TILE_ELEM_NUM",
+            )
+            host = replace_one(
+                r"constexpr uint32_t HALF_TILE_ELEM_NUM = \d+;",
+                f"constexpr uint32_t HALF_TILE_ELEM_NUM = {cand.half_tile};",
+                host,
+                "host HALF_TILE_ELEM_NUM",
+            )
+        else:
+            host = replace_one(
+                r"(constexpr uint32_t TILE_ELEM_NUM = \d+;\n)",
+                (
+                    r"\1"
+                    f"constexpr uint32_t FLOAT_TILE_ELEM_NUM = {cand.tile};\n"
+                    f"constexpr uint32_t HALF_TILE_ELEM_NUM = {cand.half_tile};\n"
+                ),
+                host,
+                "host dtype-specific tile constants",
+            )
         if "GetTileElemNum" not in host:
             host = replace_one(
                 r"(    static uint32_t GetDataTypeSize\(ge::DataType dtype\) \{\n"
