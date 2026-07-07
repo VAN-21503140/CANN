@@ -5,47 +5,63 @@
 #include "tiling_key_fast_gelu.h"
 
 constexpr int32_t BUFFER_NUM = 2;
-constexpr uint32_t TILE_ELEM_NUM = 2048;
+constexpr uint32_t TILE_ELEM_NUM = 4096;
 
 template <class DT_X>
 class KernelFastGelu {
 public:
     __aicore__ inline KernelFastGelu() {}
-    __aicore__ inline void Init(GM_ADDR x, GM_ADDR y, uint32_t length) {
-        length_ = length;
-        blockNum_ = static_cast<uint32_t>(AscendC::GetBlockNum());
-        if (blockNum_ == 0) {
-            blockNum_ = 1;
+    __aicore__ inline void Init(GM_ADDR x, GM_ADDR y, uint32_t totalLength, uint32_t smallCoreDataNum,
+                                uint32_t bigCoreDataNum, uint32_t finalBigTileNum,
+                                uint32_t finalSmallTileNum, uint32_t tileDataNum,
+                                uint32_t smallTailDataNum, uint32_t bigTailDataNum,
+                                uint32_t tailBlockNum) {
+        totalLength_ = totalLength;
+        tileDataNum_ = tileDataNum;
+
+        uint32_t core_index = AscendC::GetBlockIdx();
+        uint32_t globalBufferIndex = bigCoreDataNum * core_index;
+        if (core_index < tailBlockNum) {
+            coreDataNum_ = bigCoreDataNum;
+            tileNum_ = finalBigTileNum;
+            tailDataNum_ = bigTailDataNum;
+        } else {
+            coreDataNum_ = smallCoreDataNum;
+            tileNum_ = finalSmallTileNum;
+            tailDataNum_ = smallTailDataNum;
+            globalBufferIndex -= (bigCoreDataNum - smallCoreDataNum) * (core_index - tailBlockNum);
         }
 
-        blockLength_ = (length_ + blockNum_ - 1) / blockNum_;
-        coreOffset_ = blockLength_ * AscendC::GetBlockIdx();
-        currentBlockLength_ = length_ > coreOffset_ ? length_ - coreOffset_ : 0;
-        if (currentBlockLength_ > blockLength_) {
-            currentBlockLength_ = blockLength_;
+        coreOffset_ = globalBufferIndex;
+        realCoreDataNum_ = totalLength_ > coreOffset_ ? totalLength_ - coreOffset_ : 0;
+        if (realCoreDataNum_ > coreDataNum_) {
+            realCoreDataNum_ = coreDataNum_;
         }
 
-        xGm_.SetGlobalBuffer((__gm__ DT_X *)x + coreOffset_);
-        yGm_.SetGlobalBuffer((__gm__ DT_X *)y + coreOffset_);
+        xGm_.SetGlobalBuffer((__gm__ DT_X *)x + coreOffset_, realCoreDataNum_);
+        yGm_.SetGlobalBuffer((__gm__ DT_X *)y + coreOffset_, realCoreDataNum_);
 
-        pipe_.InitBuffer(inQueueX_, BUFFER_NUM, TILE_ELEM_NUM * sizeof(DT_X));
-        pipe_.InitBuffer(outQueueY_, BUFFER_NUM, TILE_ELEM_NUM * sizeof(DT_X));
-        pipe_.InitBuffer(sigmoidBuf_, TILE_ELEM_NUM * sizeof(DT_X));
+        pipe_.InitBuffer(inQueueX_, BUFFER_NUM, tileDataNum_ * sizeof(DT_X));
+        pipe_.InitBuffer(outQueueY_, BUFFER_NUM, tileDataNum_ * sizeof(DT_X));
+        pipe_.InitBuffer(sigmoidBuf_, tileDataNum_ * sizeof(DT_X));
     }
     __aicore__ inline void Process() {
-        if (length_ == 0 || currentBlockLength_ <= 0) {
+        if (totalLength_ == 0 || realCoreDataNum_ == 0 || tileNum_ == 0) {
             return;
         }
 
-        uint32_t tileNum = currentBlockLength_ / TILE_ELEM_NUM;
-        uint32_t tailCount = currentBlockLength_ - tileNum * TILE_ELEM_NUM;
+        for (uint32_t i = 0; i < tileNum_; ++i) {
+            uint32_t offset = i * tileDataNum_;
+            if (offset >= realCoreDataNum_) {
+                return;
+            }
 
-        for (uint32_t i = 0; i < tileNum; ++i) {
-            ProcessTile(i * TILE_ELEM_NUM, TILE_ELEM_NUM);
-        }
-
-        if (tailCount > 0) {
-            ProcessTile(tileNum * TILE_ELEM_NUM, tailCount);
+            uint32_t processDataNum = (i == tileNum_ - 1) ? tailDataNum_ : tileDataNum_;
+            uint32_t remainingDataNum = realCoreDataNum_ - offset;
+            if (processDataNum > remainingDataNum) {
+                processDataNum = remainingDataNum;
+            }
+            ProcessTile(offset, processDataNum);
         }
     }
 private:
@@ -97,11 +113,13 @@ private:
     }
 
 private:
-    uint32_t length_ = 0;
-    uint32_t blockNum_ = 1;
-    uint32_t blockLength_ = 0;
+    uint32_t totalLength_ = 0;
+    uint32_t coreDataNum_ = 0;
+    uint32_t tileNum_ = 0;
+    uint32_t tileDataNum_ = TILE_ELEM_NUM;
+    uint32_t tailDataNum_ = 0;
     uint32_t coreOffset_ = 0;
-    uint32_t currentBlockLength_ = 0;
+    uint32_t realCoreDataNum_ = 0;
 
     AscendC::TPipe pipe_;
     AscendC::GlobalTensor<DT_X> xGm_;
@@ -116,6 +134,8 @@ __global__ __aicore__ void fast_gelu(GM_ADDR x, GM_ADDR y, GM_ADDR workspace, GM
     REGISTER_TILING_DEFAULT(FastGeluTilingData);
     GET_TILING_DATA_WITH_STRUCT(FastGeluTilingData, tiling_data, tiling);
     KernelFastGelu<DT_X> op;
-    op.Init(x, y, tiling_data.length);
+    op.Init(x, y, tiling_data.totalLength, tiling_data.smallCoreDataNum, tiling_data.bigCoreDataNum,
+            tiling_data.finalBigTileNum, tiling_data.finalSmallTileNum, tiling_data.tileDataNum,
+            tiling_data.smallTailDataNum, tiling_data.bigTailDataNum, tiling_data.tailBlockNum);
     op.Process();
 }
