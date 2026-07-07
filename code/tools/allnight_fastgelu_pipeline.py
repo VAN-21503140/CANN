@@ -32,6 +32,7 @@ EDITABLE_FILES = [
     "op_kernel/tiling_key_fast_gelu.h",
 ]
 CURRENT_BEST_SUM_US = 29.70
+KNOWN_PER_POINT_BEST_US = [3.52, 3.68, 6.72, 6.46, 8.18]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -433,6 +434,65 @@ def append_jsonl(path: Path, row: dict) -> None:
         f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
+def load_history() -> dict:
+    attempted: set[str] = set()
+    best_sum = CURRENT_BEST_SUM_US
+    best_row: dict | None = None
+    per_point_best: list[float | None] = list(KNOWN_PER_POINT_BEST_US)
+    if not RUN_DIR.exists():
+        return {
+            "attempted": attempted,
+            "best_sum": best_sum,
+            "best_row": best_row,
+            "per_point_best": per_point_best,
+        }
+    for path in RUN_DIR.glob("*.jsonl"):
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            cand = row.get("candidate") or {}
+            name = cand.get("name")
+            result = row.get("result") or {}
+            if name and result.get("submission_id"):
+                attempted.add(name)
+            if result.get("passed") and result.get("sum_us") is not None:
+                if result["sum_us"] < best_sum:
+                    best_sum = result["sum_us"]
+                    best_row = row
+                for idx, value in enumerate(result.get("times_us", [])[:5]):
+                    old = per_point_best[idx]
+                    per_point_best[idx] = value if old is None else min(old, value)
+    return {
+        "attempted": attempted,
+        "best_sum": best_sum,
+        "best_row": best_row,
+        "per_point_best": per_point_best,
+    }
+
+
+def write_review_diff(run_name: str, cand: Candidate) -> Path:
+    review_dir = RUN_DIR / run_name / "review"
+    review_dir.mkdir(parents=True, exist_ok=True)
+    diff_path = review_dir / f"{cand.name}.diff"
+    proc = subprocess.run(
+        ["git", "diff", "--", *[str(CODE_DIR / rel) for rel in EDITABLE_FILES]],
+        cwd=PROJECT_ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    diff_path.write_text(proc.stdout, encoding="utf-8")
+    return diff_path
+
+
 def git_commit_candidate(cand: Candidate, result: dict) -> None:
     subprocess.run(["git", "add", *[str(CODE_DIR / rel) for rel in EDITABLE_FILES]], cwd=PROJECT_ROOT, check=True)
     times = ", ".join(f"{x:.2f}us" for x in result.get("times_us", []))
@@ -450,6 +510,13 @@ def main() -> int:
     parser.add_argument("--commit-improvements", action="store_true", help="Commit candidates that beat --best-sum.")
     parser.add_argument("--max-candidates", type=int, default=0, help="0 means all candidates.")
     parser.add_argument("--start-index", type=int, default=0)
+    parser.add_argument("--ignore-history", action="store_true", help="Do not skip candidates already found in logs.")
+    parser.add_argument("--explain-plan", action="store_true", help="Print ranked candidates/history and exit.")
+    parser.add_argument(
+        "--review-gate",
+        action="store_true",
+        help="Generate candidate code, run static checks, write a diff, then stop before online submission.",
+    )
     parser.add_argument("--best-sum", type=float, default=CURRENT_BEST_SUM_US)
     parser.add_argument("--min-improvement", type=float, default=0.03)
     parser.add_argument("--timeout-sec", type=int, default=720)
@@ -470,16 +537,35 @@ def main() -> int:
     parser.add_argument("--run-name", default=time.strftime("%Y%m%d_%H%M%S"))
     args = parser.parse_args()
 
-    plan = candidate_plan()[args.start_index :]
+    history = load_history()
+    best_sum = min(args.best_sum, history["best_sum"])
+    plan = candidate_plan()
+    if not args.ignore_history:
+        attempted = history["attempted"]
+        plan = [cand for cand in plan if cand.name not in attempted]
+    plan = plan[args.start_index :]
     if args.max_candidates > 0:
         plan = plan[: args.max_candidates]
     log_path = RUN_DIR / f"{args.run_name}.jsonl"
     base_files = read_sources()
     best_files = dict(base_files)
-    best_sum = args.best_sum
     best_name = "current"
+    if history["best_row"]:
+        best_name = (history["best_row"].get("candidate") or {}).get("name", "history")
 
-    print(json.dumps({"candidates": [dataclasses.asdict(c) for c in plan], "submit": args.submit}, ensure_ascii=True))
+    plan_summary = {
+        "candidates": [dataclasses.asdict(c) for c in plan],
+        "submit": args.submit,
+        "review_gate": args.review_gate,
+        "history": {
+            "attempted_count": len(history["attempted"]),
+            "best_sum": history["best_sum"],
+            "per_point_best": history["per_point_best"],
+        },
+    }
+    print(json.dumps(plan_summary, ensure_ascii=True))
+    if args.explain_plan:
+        return 0
     try:
         for idx, cand in enumerate(plan, start=args.start_index):
             if args.submit and idx != args.start_index and not args.no_cooldown and args.cooldown_sec > 0:
@@ -510,6 +596,14 @@ def main() -> int:
                 append_jsonl(log_path, row)
                 print(json.dumps(row, ensure_ascii=True), flush=True)
                 continue
+            if args.review_gate:
+                diff_path = write_review_diff(args.run_name, cand)
+                row["review_gate"] = True
+                row["diff_path"] = str(diff_path)
+                row["review_decision"] = "stopped_before_submit"
+                append_jsonl(log_path, row)
+                print(json.dumps(row, ensure_ascii=True), flush=True)
+                break
             if args.submit:
                 sync_result = sync_editor(files, args.session)
                 row["sync_ok"] = all(item.get("ok") for item in sync_result)
