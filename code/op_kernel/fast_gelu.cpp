@@ -30,8 +30,6 @@ public:
 
         pipe_.InitBuffer(inQueueX_, BUFFER_NUM, TILE_ELEM_NUM * sizeof(DT_X));
         pipe_.InitBuffer(outQueueY_, BUFFER_NUM, TILE_ELEM_NUM * sizeof(DT_X));
-        pipe_.InitBuffer(absBuf_, TILE_ELEM_NUM * sizeof(DT_X));
-        pipe_.InitBuffer(denomBuf_, TILE_ELEM_NUM * sizeof(DT_X));
         pipe_.InitBuffer(workBuf_, TILE_ELEM_NUM * sizeof(DT_X));
     }
     __aicore__ inline void Process() {
@@ -73,30 +71,13 @@ private:
     __aicore__ inline void Compute(uint32_t count) {
         AscendC::LocalTensor<DT_X> xLocal = inQueueX_.DeQue<DT_X>();
         AscendC::LocalTensor<DT_X> yLocal = outQueueY_.AllocTensor<DT_X>();
-        AscendC::LocalTensor<DT_X> absLocal = absBuf_.Get<DT_X>();
-        AscendC::LocalTensor<DT_X> denomLocal = denomBuf_.Get<DT_X>();
         AscendC::LocalTensor<DT_X> workLocal = workBuf_.Get<DT_X>();
 
-        AscendC::Abs(absLocal, xLocal, count);
+        AscendC::Muls(workLocal, xLocal, static_cast<DT_X>(1.702f), count);
         AscendC::PipeBarrier<PIPE_V>();
-        AscendC::Muls(denomLocal, absLocal, static_cast<DT_X>(-1.702f), count);
-        AscendC::PipeBarrier<PIPE_V>();
-        AscendC::Exp(denomLocal, denomLocal, count);
-        AscendC::PipeBarrier<PIPE_V>();
-        AscendC::Duplicate<DT_X>(workLocal, static_cast<DT_X>(1.0f), count);
-        AscendC::PipeBarrier<PIPE_V>();
-        AscendC::Add(denomLocal, denomLocal, workLocal, count);
-        AscendC::PipeBarrier<PIPE_V>();
-
-        AscendC::Sub(workLocal, xLocal, absLocal, count);
-        AscendC::PipeBarrier<PIPE_V>();
-        AscendC::Muls(workLocal, workLocal, static_cast<DT_X>(0.851f), count);
-        AscendC::PipeBarrier<PIPE_V>();
-        AscendC::Exp(workLocal, workLocal, count);
+        AscendC::Sigmoid(workLocal, workLocal, count);
         AscendC::PipeBarrier<PIPE_V>();
         AscendC::Mul(yLocal, xLocal, workLocal, count);
-        AscendC::PipeBarrier<PIPE_V>();
-        AscendC::Div(yLocal, yLocal, denomLocal, count);
         AscendC::PipeBarrier<PIPE_V>();
 
         outQueueY_.EnQue(yLocal);
@@ -127,8 +108,6 @@ private:
     AscendC::GlobalTensor<DT_X> yGm_;
     AscendC::TQue<AscendC::QuePosition::VECIN, BUFFER_NUM> inQueueX_;
     AscendC::TQue<AscendC::QuePosition::VECOUT, BUFFER_NUM> outQueueY_;
-    AscendC::TBuf<AscendC::TPosition::VECCALC> absBuf_;
-    AscendC::TBuf<AscendC::TPosition::VECCALC> denomBuf_;
     AscendC::TBuf<AscendC::TPosition::VECCALC> workBuf_;
 };
 
