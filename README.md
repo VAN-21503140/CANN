@@ -65,7 +65,7 @@ After reviewing the generated diff, submit one candidate at a controlled pace:
 d:\py\Anaconda3\python.exe code\tools\allnight_fastgelu_pipeline.py --submit --commit-improvements --stop-after-improvement --max-candidates 1 --run-name submit_next
 ```
 
-The pipeline defaults to a `900s` cooldown between online submissions when more than one candidate is run, to avoid submitting too frequently.
+The pipeline defaults to a `900s` cooldown between online submissions when more than one candidate is run, to avoid submitting too frequently. While polling a Running submission, it can periodically refresh the result page so completed results show up sooner.
 
 ## Repository Policy
 

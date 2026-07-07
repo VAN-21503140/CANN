@@ -427,21 +427,36 @@ def parse_result(text: str, url: str) -> dict:
     }
 
 
-def submit_and_poll(session: str, timeout_sec: int, poll_sec: float) -> dict:
+def refresh_page(session: str) -> None:
+    webbridge_command("evaluate", {"code": "(() => { location.reload(); return JSON.stringify({ok:true}); })()"}, session)
+
+
+def submit_and_poll(session: str, timeout_sec: int, poll_sec: float, refresh_after_polls: int) -> dict:
     clicked = click_submit(session)
     if not clicked.get("ok"):
         raise RuntimeError(f"submit click failed: {clicked}")
     start = time.monotonic()
     last_status = None
+    poll_count = 0
     while time.monotonic() - start < timeout_sec:
         state = page_state(session)
         result = parse_result(state.get("text", ""), state.get("url", ""))
+        poll_count += 1
         if result.get("status") != last_status:
             print(json.dumps({"poll_status": result.get("status"), "url": result.get("url")}), flush=True)
             last_status = result.get("status")
         if "/submission/" in result.get("url", "") and (result["passed"] or result["failed"]) and result["times_us"]:
             result["elapsed_sec"] = round(time.monotonic() - start, 1)
             return result
+        if (
+            refresh_after_polls > 0
+            and poll_count % refresh_after_polls == 0
+            and "/submission/" in result.get("url", "")
+            and result.get("status") == "Running"
+        ):
+            print(json.dumps({"refresh": True, "poll_count": poll_count, "url": result.get("url")}), flush=True)
+            refresh_page(session)
+            time.sleep(2)
         time.sleep(poll_sec)
     state = page_state(session)
     result = parse_result(state.get("text", ""), state.get("url", ""))
@@ -544,6 +559,12 @@ def main() -> int:
     parser.add_argument("--timeout-sec", type=int, default=720)
     parser.add_argument("--poll-sec", type=float, default=8.0)
     parser.add_argument(
+        "--refresh-after-polls",
+        type=int,
+        default=8,
+        help="Refresh a Running submission page after this many polls; 0 disables refresh.",
+    )
+    parser.add_argument(
         "--cooldown-sec",
         type=int,
         default=900,
@@ -631,7 +652,12 @@ def main() -> int:
                 row["sync_ok"] = all(item.get("ok") for item in sync_result)
                 row["web_hash_ok"] = verify_editor(files, args.session)
                 if row["sync_ok"] and row["web_hash_ok"]:
-                    result = submit_and_poll(args.session, args.timeout_sec, args.poll_sec)
+                    result = submit_and_poll(
+                        args.session,
+                        args.timeout_sec,
+                        args.poll_sec,
+                        args.refresh_after_polls,
+                    )
                     row["result"] = result
                     if result.get("passed") and result.get("sum_us") is not None:
                         improved = result["sum_us"] + args.min_improvement < best_sum
