@@ -33,7 +33,6 @@ public:
         pipe_.InitBuffer(absBuf_, TILE_ELEM_NUM * sizeof(DT_X));
         pipe_.InitBuffer(denomBuf_, TILE_ELEM_NUM * sizeof(DT_X));
         pipe_.InitBuffer(workBuf_, TILE_ELEM_NUM * sizeof(DT_X));
-        pipe_.InitBuffer(numerBuf_, TILE_ELEM_NUM * sizeof(DT_X));
     }
     __aicore__ inline void Process() {
         if (length_ == 0 || currentBlockLength_ <= 0) {
@@ -77,7 +76,6 @@ private:
         AscendC::LocalTensor<DT_X> absLocal = absBuf_.Get<DT_X>();
         AscendC::LocalTensor<DT_X> denomLocal = denomBuf_.Get<DT_X>();
         AscendC::LocalTensor<DT_X> workLocal = workBuf_.Get<DT_X>();
-        AscendC::LocalTensor<DT_X> numerLocal = numerBuf_.Get<DT_X>();
 
         AscendC::Abs(absLocal, xLocal, count);
         AscendC::PipeBarrier<PIPE_V>();
@@ -96,9 +94,9 @@ private:
         AscendC::PipeBarrier<PIPE_V>();
         AscendC::Exp(workLocal, workLocal, count);
         AscendC::PipeBarrier<PIPE_V>();
-        AscendC::Mul(numerLocal, xLocal, workLocal, count);
+        AscendC::Mul(yLocal, xLocal, workLocal, count);
         AscendC::PipeBarrier<PIPE_V>();
-        AscendC::Div(yLocal, numerLocal, denomLocal, count);
+        AscendC::Div(yLocal, yLocal, denomLocal, count);
         AscendC::PipeBarrier<PIPE_V>();
 
         outQueueY_.EnQue(yLocal);
@@ -132,7 +130,6 @@ private:
     AscendC::TBuf<AscendC::TPosition::VECCALC> absBuf_;
     AscendC::TBuf<AscendC::TPosition::VECCALC> denomBuf_;
     AscendC::TBuf<AscendC::TPosition::VECCALC> workBuf_;
-    AscendC::TBuf<AscendC::TPosition::VECCALC> numerBuf_;
 };
 
 template <typename DT_X>
