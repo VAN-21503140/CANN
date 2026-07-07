@@ -31,15 +31,18 @@ EDITABLE_FILES = [
     "op_kernel/fast_gelu.cpp",
     "op_kernel/tiling_key_fast_gelu.h",
 ]
-CURRENT_BEST_SUM_US = 29.80
+CURRENT_BEST_SUM_US = 29.70
 
 
 @dataclasses.dataclass(frozen=True)
 class Candidate:
     name: str
+    kind: str
     tile: int
     threshold_mult: int
     buffer_num: int
+    half_tile: int | None = None
+    hypothesis: str = ""
 
 
 def normalize(text: str) -> str:
@@ -73,15 +76,63 @@ def apply_candidate(base_files: dict[str, str], cand: Candidate) -> dict[str, st
     if "Sigmoid(" not in kernel:
         raise RuntimeError("baseline kernel must already use the sigmoid formula")
 
+    if cand.kind == "dtype_tile":
+        host = replace_one(
+            r"constexpr uint32_t TILE_ELEM_NUM = \d+;",
+            (
+                f"constexpr uint32_t TILE_ELEM_NUM = {max(cand.tile, cand.half_tile or cand.tile)};\n"
+                f"constexpr uint32_t FLOAT_TILE_ELEM_NUM = {cand.tile};\n"
+                f"constexpr uint32_t HALF_TILE_ELEM_NUM = {cand.half_tile};"
+            ),
+            host,
+            "host dtype-aware TILE_ELEM_NUM",
+        )
+        if "GetTileElemNum" not in host:
+            host = replace_one(
+                r"(    static uint32_t GetDataTypeSize\(ge::DataType dtype\) \{\n"
+                r"        return dtype == ge::DT_FLOAT16 \? 2U : 4U;\n"
+                r"    \}\n)",
+                (
+                    r"\1\n"
+                    "    static uint32_t GetTileElemNum(ge::DataType dtype) {\n"
+                    "        return dtype == ge::DT_FLOAT16 ? HALF_TILE_ELEM_NUM : FLOAT_TILE_ELEM_NUM;\n"
+                    "    }\n"
+                ),
+                host,
+                "host GetTileElemNum",
+            )
+        if "uint32_t tile_elem_num = GetTileElemNum(dtype_x);" not in host:
+            host = replace_one(
+                r"(        uint32_t type_length = GetDataTypeSize\(dtype_x\);\n)",
+                r"\1        uint32_t tile_elem_num = GetTileElemNum(dtype_x);\n",
+                host,
+                "host tile_elem_num local",
+            )
+        host = host.replace(
+            "uint32_t tile_block_num = (TILE_ELEM_NUM * type_length) / BLOCK_SIZE;",
+            "uint32_t tile_block_num = (tile_elem_num * type_length) / BLOCK_SIZE;",
+        )
+        host = host.replace(
+            "uint32_t small_tail_data_num = small_core_data_num - TILE_ELEM_NUM * small_tile_num;",
+            "uint32_t small_tail_data_num = small_core_data_num - tile_elem_num * small_tile_num;",
+        )
+        host = host.replace("small_tail_data_num = TILE_ELEM_NUM;", "small_tail_data_num = tile_elem_num;")
+        host = host.replace(
+            "uint32_t big_tail_data_num = big_core_data_num - TILE_ELEM_NUM * big_tile_num;",
+            "uint32_t big_tail_data_num = big_core_data_num - tile_elem_num * big_tile_num;",
+        )
+        host = host.replace("big_tail_data_num = TILE_ELEM_NUM;", "big_tail_data_num = tile_elem_num;")
+        host = host.replace("tiling->tileDataNum = TILE_ELEM_NUM;", "tiling->tileDataNum = tile_elem_num;")
+    else:
+        host = replace_one(
+            r"constexpr uint32_t TILE_ELEM_NUM = \d+;",
+            f"constexpr uint32_t TILE_ELEM_NUM = {cand.tile};",
+            host,
+            "host TILE_ELEM_NUM",
+        )
     host = replace_one(
-        r"constexpr uint32_t TILE_ELEM_NUM = \d+;",
-        f"constexpr uint32_t TILE_ELEM_NUM = {cand.tile};",
-        host,
-        "host TILE_ELEM_NUM",
-    )
-    host = replace_one(
-        r"constexpr uint32_t LARGE_CORE_THRESHOLD = TILE_ELEM_NUM \* \d+;",
-        f"constexpr uint32_t LARGE_CORE_THRESHOLD = TILE_ELEM_NUM * {cand.threshold_mult};",
+        r"constexpr uint32_t LARGE_CORE_THRESHOLD = (?:TILE_ELEM_NUM|CORE_SPLIT_ELEM_NUM) \* \d+;",
+        f"constexpr uint32_t LARGE_CORE_THRESHOLD = CORE_SPLIT_ELEM_NUM * {cand.threshold_mult};",
         host,
         "host LARGE_CORE_THRESHOLD",
     )
@@ -93,7 +144,7 @@ def apply_candidate(base_files: dict[str, str], cand: Candidate) -> dict[str, st
     )
     kernel = replace_one(
         r"constexpr uint32_t TILE_ELEM_NUM = \d+;",
-        f"constexpr uint32_t TILE_ELEM_NUM = {cand.tile};",
+        f"constexpr uint32_t TILE_ELEM_NUM = {max(cand.tile, cand.half_tile or cand.tile)};",
         kernel,
         "kernel TILE_ELEM_NUM",
     )
@@ -104,36 +155,76 @@ def apply_candidate(base_files: dict[str, str], cand: Candidate) -> dict[str, st
 
 def candidate_plan() -> list[Candidate]:
     candidates: list[Candidate] = []
-    order = [
-        (2048, 3, 2),
-        (2048, 2, 2),
-        (2048, 6, 2),
-        (2048, 8, 2),
-        (1024, 4, 2),
-        (1024, 3, 2),
-        (1024, 6, 2),
-        (4096, 4, 2),
-        (4096, 2, 2),
-        (4096, 6, 2),
-        (1536, 4, 2),
-        (3072, 4, 2),
-        (2048, 4, 1),
-        (1024, 4, 1),
-        (4096, 4, 1),
+    high_value = [
+        Candidate(
+            "v6_dtype_f4096_h8192_thr4_buf2",
+            "dtype_tile",
+            4096,
+            4,
+            2,
+            half_tile=8192,
+            hypothesis="Keep float32 16KB tiles and raise float16 tiles to 16KB copy size.",
+        ),
+        Candidate(
+            "v6_dtype_f4096_h8192_thr4_buf1",
+            "dtype_tile",
+            4096,
+            4,
+            1,
+            half_tile=8192,
+            hypothesis="Serial loop may not benefit from BUFFER_NUM=2; reduce queue/UB pressure.",
+        ),
+        Candidate(
+            "v6_dtype_f4096_h6144_thr4_buf2",
+            "dtype_tile",
+            4096,
+            4,
+            2,
+            half_tile=6144,
+            hypothesis="Intermediate half tile between 8KB and 16KB may help test 4 tail balance.",
+        ),
+        Candidate(
+            "v6_const_t3072_thr4_buf2",
+            "const_tile",
+            3072,
+            4,
+            2,
+            hypothesis="Reduce V5 tile size to recover test 4 while staying larger than V3.",
+        ),
+        Candidate(
+            "v6_const_t2048_thr4_buf1",
+            "const_tile",
+            2048,
+            4,
+            1,
+            hypothesis="Use V3-sized tiles with generalized distribution and lower buffer depth.",
+        ),
     ]
-    seen: set[tuple[int, int, int]] = set()
-    for tile, mult, buf in order:
-        key = (tile, mult, buf)
+    seen: set[tuple[str, int, int, int, int | None]] = set()
+    for cand in high_value:
+        key = (cand.kind, cand.tile, cand.threshold_mult, cand.buffer_num, cand.half_tile)
         if key in seen:
             continue
         seen.add(key)
-        candidates.append(Candidate(f"v3sig_t{tile}_thr{mult}_buf{buf}", tile, mult, buf))
-    for tile in [768, 1280, 1792, 2560, 3584]:
+        candidates.append(cand)
+
+    # Lower-priority coarse sweeps. Keep these behind the hypothesis-driven
+    # candidates so overnight runs do not spam CANNJudge with low-signal tries.
+    for tile in [4096, 2048, 3072, 2560, 3584, 1024]:
         for mult in [3, 4, 6]:
-            key = (tile, mult, 2)
+            key = ("const_tile", tile, mult, 2, None)
             if key not in seen:
                 seen.add(key)
-                candidates.append(Candidate(f"v3sig_t{tile}_thr{mult}_buf2", tile, mult, 2))
+                candidates.append(
+                    Candidate(
+                        f"v6_const_t{tile}_thr{mult}_buf2",
+                        "const_tile",
+                        tile,
+                        mult,
+                        2,
+                        hypothesis="Low-priority coarse sweep after dtype-aware candidates.",
+                    )
+                )
     return candidates
 
 
@@ -363,6 +454,18 @@ def main() -> int:
     parser.add_argument("--min-improvement", type=float, default=0.03)
     parser.add_argument("--timeout-sec", type=int, default=720)
     parser.add_argument("--poll-sec", type=float, default=8.0)
+    parser.add_argument(
+        "--cooldown-sec",
+        type=int,
+        default=900,
+        help="Delay between online submissions; default 900s to avoid overloading CANNJudge.",
+    )
+    parser.add_argument("--no-cooldown", action="store_true", help="Disable inter-candidate cooldown.")
+    parser.add_argument(
+        "--stop-after-improvement",
+        action="store_true",
+        help="Stop the run after the first candidate beating --best-sum.",
+    )
     parser.add_argument("--session", default="fastgelu-allnight")
     parser.add_argument("--run-name", default=time.strftime("%Y%m%d_%H%M%S"))
     args = parser.parse_args()
@@ -379,6 +482,19 @@ def main() -> int:
     print(json.dumps({"candidates": [dataclasses.asdict(c) for c in plan], "submit": args.submit}, ensure_ascii=True))
     try:
         for idx, cand in enumerate(plan, start=args.start_index):
+            if args.submit and idx != args.start_index and not args.no_cooldown and args.cooldown_sec > 0:
+                print(
+                    json.dumps(
+                        {
+                            "cooldown_sec": args.cooldown_sec,
+                            "next_candidate": cand.name,
+                            "reason": "avoid frequent CANNJudge submissions",
+                        },
+                        ensure_ascii=True,
+                    ),
+                    flush=True,
+                )
+                time.sleep(args.cooldown_sec)
             files = apply_candidate(base_files, cand)
             write_sources(files)
             ok, static_output = run_static()
@@ -410,6 +526,10 @@ def main() -> int:
                             best_files = files
                             if args.commit_improvements:
                                 git_commit_candidate(cand, result)
+                            if args.stop_after_improvement:
+                                append_jsonl(log_path, row)
+                                print(json.dumps(row, ensure_ascii=True), flush=True)
+                                break
                     else:
                         row["improved"] = False
                 append_jsonl(log_path, row)
