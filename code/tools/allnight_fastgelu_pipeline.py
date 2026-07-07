@@ -151,6 +151,19 @@ def apply_candidate(base_files: dict[str, str], cand: Candidate) -> dict[str, st
             host,
             "host TILE_ELEM_NUM",
         )
+        if "constexpr uint32_t FLOAT_TILE_ELEM_NUM" in host:
+            host = replace_one(
+                r"constexpr uint32_t FLOAT_TILE_ELEM_NUM = \d+;",
+                f"constexpr uint32_t FLOAT_TILE_ELEM_NUM = {cand.tile};",
+                host,
+                "host const FLOAT_TILE_ELEM_NUM",
+            )
+            host = replace_one(
+                r"constexpr uint32_t HALF_TILE_ELEM_NUM = \d+;",
+                f"constexpr uint32_t HALF_TILE_ELEM_NUM = {cand.tile};",
+                host,
+                "host const HALF_TILE_ELEM_NUM",
+            )
     host = replace_one(
         r"constexpr uint32_t LARGE_CORE_THRESHOLD = (?:TILE_ELEM_NUM|CORE_SPLIT_ELEM_NUM) \* \d+;",
         f"constexpr uint32_t LARGE_CORE_THRESHOLD = CORE_SPLIT_ELEM_NUM * {cand.threshold_mult};",
