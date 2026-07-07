@@ -31,8 +31,8 @@ EDITABLE_FILES = [
     "op_kernel/fast_gelu.cpp",
     "op_kernel/tiling_key_fast_gelu.h",
 ]
-CURRENT_BEST_SUM_US = 29.70
-KNOWN_PER_POINT_BEST_US = [3.52, 3.68, 6.72, 6.46, 8.18]
+CURRENT_BEST_SUM_US = 28.76
+KNOWN_PER_POINT_BEST_US = [3.52, 3.38, 6.40, 6.46, 7.92]
 
 
 @dataclasses.dataclass(frozen=True)
