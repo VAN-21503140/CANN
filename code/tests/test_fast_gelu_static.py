@@ -25,15 +25,19 @@ class FastGeluStaticTests(unittest.TestCase):
 
     def test_tiling_keeps_total_length_for_dynamic_kernel(self):
         tiling = read(TILING)
-        self.assertIn("uint32_t length", tiling)
+        self.assertIn("uint32_t totalLength", tiling)
+        self.assertIn("uint32_t smallCoreDataNum", tiling)
+        self.assertIn("uint32_t bigCoreDataNum", tiling)
+        self.assertIn("uint32_t tileDataNum", tiling)
         self.assertIn("FastGeluTilingData", tiling)
 
     def test_kernel_splits_work_by_core_and_handles_empty_cores(self):
         kernel = read(KERNEL)
         self.assertIn("GetBlockIdx()", kernel)
-        self.assertIn("blockLength", kernel)
-        self.assertIn("currentBlockLength_", kernel)
-        self.assertIn("<= 0", kernel)
+        self.assertIn("coreDataNum_", kernel)
+        self.assertIn("realCoreDataNum_", kernel)
+        self.assertIn("tileNum_", kernel)
+        self.assertIn("== 0", kernel)
         self.assertIn("return;", kernel)
 
     def test_kernel_uses_tail_safe_padded_copies(self):
@@ -45,10 +49,15 @@ class FastGeluStaticTests(unittest.TestCase):
     def test_kernel_implements_fast_gelu_vector_formula(self):
         kernel = read(KERNEL)
         for token in [
+            "Abs(",
             "Muls(",
-            "Sigmoid(",
+            "Exp(",
+            "Adds(",
+            "Sub(",
             "Mul(",
-            "1.702",
+            "Div(",
+            "-1.702",
+            "0.851",
         ]:
             self.assertIn(token, kernel)
 

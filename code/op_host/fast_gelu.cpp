@@ -5,25 +5,81 @@
 #include "../op_kernel/fast_gelu_tiling.h"
 #include "../op_kernel/tiling_key_fast_gelu.h"
 
+constexpr uint32_t BLOCK_SIZE = 32;
+constexpr uint32_t TILE_ELEM_NUM = 2048;
+
 namespace optiling {
+    static uint32_t GetDataTypeSize(ge::DataType dtype) {
+        return dtype == ge::DT_FLOAT16 ? 2U : 4U;
+    }
+
     static ge::graphStatus TilingFunc(gert::TilingContext *context) {
         auto platform = platform_ascendc::PlatformAscendC(context->GetPlatformInfo());
         int32_t num_cores_aiv = platform.GetCoreNumAiv();
         const gert::Tensor *tensor_x = context->GetRequiredInputTensor(0);
         ge::DataType dtype_x = tensor_x->GetDataType();
         uint32_t length_x = static_cast<uint32_t>(tensor_x->GetShapeSize());
+        uint32_t type_length = GetDataTypeSize(dtype_x);
 
         uint32_t DT_X = static_cast<uint32_t>(dtype_x);
         ASCENDC_TPL_SEL_PARAM(context, DT_X);
 
         FastGeluTilingData *tiling = context->GetTilingData<FastGeluTilingData>();
-        tiling->length = length_x;
+        tiling->totalLength = length_x;
 
-        uint32_t block_dim = num_cores_aiv > 0 ? static_cast<uint32_t>(num_cores_aiv) : 1U;
-        if (length_x > 0 && length_x < block_dim) {
-            block_dim = length_x;
+        uint64_t input_length_bytes = static_cast<uint64_t>(length_x) * type_length;
+        uint32_t aligned_length_bytes =
+            input_length_bytes == 0
+                ? 0U
+                : static_cast<uint32_t>(((input_length_bytes + BLOCK_SIZE - 1) / BLOCK_SIZE) * BLOCK_SIZE);
+        uint32_t total_block_num = aligned_length_bytes / BLOCK_SIZE;
+
+        uint32_t max_core_num = num_cores_aiv > 0 ? static_cast<uint32_t>(num_cores_aiv) : 1U;
+        uint32_t block_dim = 1U;
+        if (total_block_num > 0) {
+            block_dim = total_block_num < max_core_num ? total_block_num : max_core_num;
         }
         context->SetBlockDim(block_dim);
+
+        uint32_t base_block_num = block_dim > 0 ? total_block_num / block_dim : 0U;
+        uint32_t tail_block_num = block_dim > 0 ? total_block_num % block_dim : 0U;
+        uint32_t tile_block_num = (TILE_ELEM_NUM * type_length) / BLOCK_SIZE;
+        if (tile_block_num == 0) {
+            tile_block_num = 1;
+        }
+
+        uint32_t small_core_data_num = base_block_num * BLOCK_SIZE / type_length;
+        uint32_t big_core_data_num = (base_block_num + 1U) * BLOCK_SIZE / type_length;
+
+        uint32_t small_tile_num = base_block_num / tile_block_num;
+        uint32_t final_small_tile_num =
+            base_block_num == 0
+                ? 0U
+                : ((base_block_num % tile_block_num) == 0 ? small_tile_num : small_tile_num + 1U);
+        uint32_t small_tail_data_num = small_core_data_num - TILE_ELEM_NUM * small_tile_num;
+        if (small_tail_data_num == 0 && final_small_tile_num > 0) {
+            small_tail_data_num = TILE_ELEM_NUM;
+        }
+
+        uint32_t big_block_num = base_block_num + 1U;
+        uint32_t big_tile_num = big_block_num / tile_block_num;
+        uint32_t final_big_tile_num =
+            big_block_num == 0
+                ? 0U
+                : ((big_block_num % tile_block_num) == 0 ? big_tile_num : big_tile_num + 1U);
+        uint32_t big_tail_data_num = big_core_data_num - TILE_ELEM_NUM * big_tile_num;
+        if (big_tail_data_num == 0 && final_big_tile_num > 0) {
+            big_tail_data_num = TILE_ELEM_NUM;
+        }
+
+        tiling->smallCoreDataNum = small_core_data_num;
+        tiling->bigCoreDataNum = big_core_data_num;
+        tiling->finalBigTileNum = final_big_tile_num;
+        tiling->finalSmallTileNum = final_small_tile_num;
+        tiling->tileDataNum = TILE_ELEM_NUM;
+        tiling->smallTailDataNum = small_tail_data_num;
+        tiling->bigTailDataNum = big_tail_data_num;
+        tiling->tailBlockNum = tail_block_num;
 
         size_t *currentWorkspace = context->GetWorkspaceSizes(1);
         currentWorkspace[0] = 0;
