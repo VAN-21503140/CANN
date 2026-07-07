@@ -317,11 +317,11 @@ def ensure_submit_editor(session: str) -> None:
     raise RuntimeError("submit editor did not become available")
 
 
-def sync_editor(files: dict[str, str], session: str) -> list[dict]:
-    ensure_submit_editor(session)
+def write_editor_file(rel: str, text: str, session: str) -> dict:
     js = """
     (async () => {
-      const files = FILES_JSON;
+      const rel = REL_JSON;
+      const text = TEXT_JSON;
       const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
       const setNativeValue = (element, value) => {
         const descriptor = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(element), 'value');
@@ -329,33 +329,35 @@ def sync_editor(files: dict[str, str], session: str) -> list[dict]:
         element.dispatchEvent(new Event('input', {bubbles: true}));
         element.dispatchEvent(new Event('change', {bubbles: true}));
       };
-      const result = [];
-      for (const [rel, text] of Object.entries(files)) {
-        const buttons = [...document.querySelectorAll('button[title]')];
-        const btn =
-          buttons.find(b => b.getAttribute('title') === rel && b.className.includes('open-editor-tree-row')) ||
-          buttons.find(b => b.getAttribute('title') === rel && b.className.includes('open-editor-file-tab-trigger')) ||
-          buttons.find(b => b.getAttribute('title') === rel);
-        if (!btn) {
-          result.push({rel, ok: false, error: 'file button not found'});
-          continue;
-        }
-        btn.click();
-        await sleep(200);
-        const ta = document.querySelector('textarea#editor-main');
-        if (!ta) {
-          result.push({rel, ok: false, error: 'textarea not found'});
-          continue;
-        }
-        setNativeValue(ta, text);
-        await sleep(100);
-        result.push({rel, ok: ta.value === text, length: ta.value.length, sha256: SHA256_PLACEHOLDER});
+      const buttons = [...document.querySelectorAll('button[title]')];
+      const btn =
+        buttons.find(b => b.getAttribute('title') === rel && b.className.includes('open-editor-tree-row')) ||
+        buttons.find(b => b.getAttribute('title') === rel && b.className.includes('open-editor-file-tab-trigger')) ||
+        buttons.find(b => b.getAttribute('title') === rel);
+      if (!btn) {
+        return JSON.stringify({rel, ok: false, error: 'file button not found'});
       }
-      return JSON.stringify(result);
+      btn.click();
+      await sleep(200);
+      const ta = document.querySelector('textarea#editor-main');
+      if (!ta) {
+        return JSON.stringify({rel, ok: false, error: 'textarea not found'});
+      }
+      setNativeValue(ta, text);
+      await sleep(100);
+      return JSON.stringify({rel, ok: ta.value === text, length: ta.value.length});
     })()
-    """.replace("FILES_JSON", json.dumps(files)).replace("sha256: SHA256_PLACEHOLDER", "sha256: null")
-    result = webbridge_command("evaluate", {"code": js}, session)
-    return json.loads(result["value"])
+    """.replace("REL_JSON", json.dumps(rel)).replace("TEXT_JSON", json.dumps(text))
+    data = webbridge_command("evaluate", {"code": js}, session)
+    return json.loads(data["value"])
+
+
+def sync_editor(files: dict[str, str], session: str) -> list[dict]:
+    ensure_submit_editor(session)
+    result = []
+    for rel in EDITABLE_FILES:
+        result.append(write_editor_file(rel, files[rel], session))
+    return result
 
 
 def read_editor_file(rel: str, session: str) -> str:
