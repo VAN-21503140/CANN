@@ -6,11 +6,11 @@ This repository tracks the FastGelu custom CANN operator solution and every impo
 
 Current best version:
 
-- Commit: current commit / `manual_v7_remove_final_pipebarrier`
-- CANNJudge submission: `86226`
+- Commit: current commit / `manual_v9_aiv_core_cap24`
+- CANNJudge submission: `86658`
 - Result: Pass `5/5`
-- Times: `3.08 / 4.10 / 6.26 / 6.82 / 7.90 us`
-- Sum: `28.16 us`
+- Times: `3.26 / 4.36 / 6.22 / 6.32 / 7.88 us`
+- Sum: `28.04 us`
 
 ## Version History
 
@@ -27,6 +27,7 @@ Current best version:
 | current commit | V7 lower large-core threshold | Kept V6 dtype-aware tiles and lowered `LARGE_CORE_THRESHOLD` from `CORE_SPLIT_ELEM_NUM * 4` to `* 3` | `85408` | `4.22 / 3.38 / 6.32 / 6.66 / 7.98` | `28.56` | Pass 5/5 |
 | `e6b2639` (`experiment/fastgelu-thr2p5-85442`) | V7 threshold interpolation | Same V7 dtype-aware tiles, but interpolated `LARGE_CORE_THRESHOLD` to `CORE_SPLIT_ELEM_NUM * 5 / 2`; kept on an experiment branch while `main` stays on the best `* 3` version | `85442` | `3.96 / 3.22 / 6.52 / 6.64 / 8.32` | `28.66` | Pass 5/5 |
 | current commit | V8 remove final vector barrier | Kept V7 tiling and removed the final `PipeBarrier<PIPE_V>()` after `Mul` before `EnQue` | `86226` | `3.08 / 4.10 / 6.26 / 6.82 / 7.90` | `28.16` | Pass 5/5 |
+| current commit | V9 cap AIV cores at 24 | Kept the V8 kernel and capped host-side `max_core_num` at the physical AI Core count after confirming the judge machine has 24 AI Cores and 48 Vector units | `86658` | `3.26 / 4.36 / 6.22 / 6.32 / 7.88` | `28.04` | Pass 5/5 |
 
 Documentation and automation commits:
 
@@ -45,6 +46,7 @@ Main lessons so far:
 - Generalized 32B big/small core tiling helps larger cases, but can hurt some tests if the tile size is not matched to dtype.
 - Lowering the large-core threshold from `CORE_SPLIT_ELEM_NUM * 4` to `* 3` gave the best threshold-only total. The `* 5 / 2` interpolation improved tests 1, 2, and 4 versus `* 3`, but regressed tests 3 and 5 enough to land slower overall (`28.66 us` vs `28.56 us`).
 - The final vector barrier after `Mul` was not needed before `EnQue` for correctness on CANNJudge and removing it improved total runtime.
+- The judge hardware reports more AIV capacity than this operator should shard across. Capping host-side AIV cores at `24`, matching the physical AI Core count, beat uncapped V8 even though tests 1 and 2 became slower; tests 3, 4, and 5 improved enough to make the total best so far.
 - Based on the CANN performance skill, single copy chunks around `16KB` are a useful target:
   - float32 `4096` elements = `16KB`
   - float16 `8192` elements = `16KB`
