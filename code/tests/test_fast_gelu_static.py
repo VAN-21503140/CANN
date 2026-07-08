@@ -32,6 +32,17 @@ class FastGeluStaticTests(unittest.TestCase):
         self.assertIn("uint32_t tailBlockNum", tiling)
         self.assertIn("FastGeluTilingData", tiling)
 
+    def test_host_uses_compute_cost_segmented_core_policy(self):
+        host = read(HOST)
+        self.assertIn("VECTOR_CORE_CAP = 48", host)
+        self.assertIn("GetTargetCoreNum", host)
+        self.assertIn("length_x <= CORE_SPLIT_ELEM_NUM * 3U", host)
+        self.assertIn("length_x <= tile_elem_num * 4U", host)
+        self.assertIn("length_x <= tile_elem_num * 8U", host)
+        self.assertIn("length_x <= tile_elem_num * 16U", host)
+        self.assertIn("length_x <= tile_elem_num * 48U", host)
+        self.assertIn("block_dim = GetTargetCoreNum(length_x, dtype_x)", host)
+
     def test_kernel_splits_work_by_core_and_handles_empty_cores(self):
         kernel = read(KERNEL)
         self.assertIn("GetBlockIdx()", kernel)

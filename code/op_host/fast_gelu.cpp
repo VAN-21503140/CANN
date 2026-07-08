@@ -10,16 +10,43 @@ constexpr uint32_t CORE_SPLIT_ELEM_NUM = 2048;
 constexpr uint32_t TILE_ELEM_NUM = 8192;
 constexpr uint32_t FLOAT_TILE_ELEM_NUM = 4096;
 constexpr uint32_t HALF_TILE_ELEM_NUM = 8192;
-constexpr uint32_t LARGE_CORE_THRESHOLD = CORE_SPLIT_ELEM_NUM * 3;
-constexpr uint32_t AIV_CORE_CAP = 24;
+constexpr uint32_t VECTOR_CORE_CAP = 48;
 
 namespace optiling {
+    static uint32_t CeilDiv(uint32_t value, uint32_t divisor) {
+        return value == 0 || divisor == 0 ? 0U : 1U + (value - 1U) / divisor;
+    }
+
     static uint32_t GetDataTypeSize(ge::DataType dtype) {
         return dtype == ge::DT_FLOAT16 ? 2U : 4U;
     }
 
     static uint32_t GetTileElemNum(ge::DataType dtype) {
         return dtype == ge::DT_FLOAT16 ? HALF_TILE_ELEM_NUM : FLOAT_TILE_ELEM_NUM;
+    }
+
+    static uint32_t GetTargetCoreNum(uint32_t length_x, ge::DataType dtype) {
+        if (length_x == 0) {
+            return 1U;
+        }
+        if (length_x <= CORE_SPLIT_ELEM_NUM * 3U) {
+            return CeilDiv(length_x, CORE_SPLIT_ELEM_NUM);
+        }
+
+        uint32_t tile_elem_num = GetTileElemNum(dtype);
+        if (length_x <= tile_elem_num * 4U) {
+            return 8U;
+        }
+        if (length_x <= tile_elem_num * 8U) {
+            return 12U;
+        }
+        if (length_x <= tile_elem_num * 16U) {
+            return 16U;
+        }
+        if (length_x <= tile_elem_num * 48U) {
+            return 24U;
+        }
+        return VECTOR_CORE_CAP;
     }
 
     static ge::graphStatus TilingFunc(gert::TilingContext *context) {
@@ -47,17 +74,15 @@ namespace optiling {
         uint32_t block_dim = 1U;
         if (total_block_num > 0) {
             uint32_t max_core_num = num_cores_aiv > 0 ? static_cast<uint32_t>(num_cores_aiv) : 1U;
-            if (max_core_num > AIV_CORE_CAP) {
-                max_core_num = AIV_CORE_CAP;
+            if (max_core_num > VECTOR_CORE_CAP) {
+                max_core_num = VECTOR_CORE_CAP;
             }
-            uint32_t needed_core_num = (length_x + CORE_SPLIT_ELEM_NUM - 1) / CORE_SPLIT_ELEM_NUM;
-            if (length_x > LARGE_CORE_THRESHOLD) {
-                block_dim = total_block_num < max_core_num ? total_block_num : max_core_num;
-            } else {
-                block_dim = needed_core_num < max_core_num ? needed_core_num : max_core_num;
-                if (block_dim > total_block_num) {
-                    block_dim = total_block_num;
-                }
+            block_dim = GetTargetCoreNum(length_x, dtype_x);
+            if (block_dim > max_core_num) {
+                block_dim = max_core_num;
+            }
+            if (block_dim > total_block_num) {
+                block_dim = total_block_num;
             }
         }
         context->SetBlockDim(block_dim);
