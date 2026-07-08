@@ -27,6 +27,7 @@ Current best version:
 | current commit | V7 lower large-core threshold | Kept V6 dtype-aware tiles and lowered `LARGE_CORE_THRESHOLD` from `CORE_SPLIT_ELEM_NUM * 4` to `* 3` | `85408` | `4.22 / 3.38 / 6.32 / 6.66 / 7.98` | `28.56` | Pass 5/5 |
 | `e6b2639` (`experiment/fastgelu-thr2p5-85442`) | V7 threshold interpolation | Same V7 dtype-aware tiles, but interpolated `LARGE_CORE_THRESHOLD` to `CORE_SPLIT_ELEM_NUM * 5 / 2`; kept on an experiment branch while `main` stays on the best `* 3` version | `85442` | `3.96 / 3.22 / 6.52 / 6.64 / 8.32` | `28.66` | Pass 5/5 |
 | current commit | V8 remove final vector barrier | Kept V7 tiling and removed the final `PipeBarrier<PIPE_V>()` after `Mul` before `EnQue` | `86226` | `3.08 / 4.10 / 6.26 / 6.82 / 7.90` | `28.16` | Pass 5/5 |
+| current experiment branch | V8 remove Sigmoid-to-Mul barrier | Removed the `PipeBarrier<PIPE_V>()` between `Sigmoid` and `Mul`, in addition to the V8 final-barrier removal | `86290` | `3.28 / 4.26 / 6.66 / 6.80 / 7.88` | `28.88` | Pass 5/5 |
 
 Documentation and automation commits:
 
@@ -45,6 +46,7 @@ Main lessons so far:
 - Generalized 32B big/small core tiling helps larger cases, but can hurt some tests if the tile size is not matched to dtype.
 - Lowering the large-core threshold from `CORE_SPLIT_ELEM_NUM * 4` to `* 3` gave the best threshold-only total. The `* 5 / 2` interpolation improved tests 1, 2, and 4 versus `* 3`, but regressed tests 3 and 5 enough to land slower overall (`28.66 us` vs `28.56 us`).
 - The final vector barrier after `Mul` was not needed before `EnQue` for correctness on CANNJudge and removing it improved total runtime.
+- Removing the dependency barrier between `Sigmoid` and `Mul` also passed correctness, but slowed the total to `28.88 us`; keep that version only as an experiment branch.
 - Based on the CANN performance skill, single copy chunks around `16KB` are a useful target:
   - float32 `4096` elements = `16KB`
   - float16 `8192` elements = `16KB`

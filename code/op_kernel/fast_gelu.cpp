@@ -92,7 +92,6 @@ private:
         AscendC::Muls(sigmoidLocal, xLocal, static_cast<DT_X>(1.702f), count);
         AscendC::PipeBarrier<PIPE_V>();
         AscendC::Sigmoid(sigmoidLocal, sigmoidLocal, count);
-        AscendC::PipeBarrier<PIPE_V>();
         AscendC::Mul(yLocal, xLocal, sigmoidLocal, count);
 
         outQueueY_.EnQue(yLocal);
