@@ -10,7 +10,8 @@ constexpr uint32_t CORE_SPLIT_ELEM_NUM = 2048;
 constexpr uint32_t TILE_ELEM_NUM = 8192;
 constexpr uint32_t FLOAT_TILE_ELEM_NUM = 4096;
 constexpr uint32_t HALF_TILE_ELEM_NUM = 8192;
-constexpr uint32_t LARGE_CORE_THRESHOLD = CORE_SPLIT_ELEM_NUM * 3;
+constexpr uint32_t FLOAT_LARGE_CORE_THRESHOLD = CORE_SPLIT_ELEM_NUM * 5 / 2;
+constexpr uint32_t HALF_LARGE_CORE_THRESHOLD = CORE_SPLIT_ELEM_NUM * 3;
 
 namespace optiling {
     static uint32_t GetDataTypeSize(ge::DataType dtype) {
@@ -47,7 +48,9 @@ namespace optiling {
         if (total_block_num > 0) {
             uint32_t max_core_num = num_cores_aiv > 0 ? static_cast<uint32_t>(num_cores_aiv) : 1U;
             uint32_t needed_core_num = (length_x + CORE_SPLIT_ELEM_NUM - 1) / CORE_SPLIT_ELEM_NUM;
-            if (length_x > LARGE_CORE_THRESHOLD) {
+            uint32_t large_core_threshold =
+                dtype_x == ge::DT_FLOAT16 ? HALF_LARGE_CORE_THRESHOLD : FLOAT_LARGE_CORE_THRESHOLD;
+            if (length_x > large_core_threshold) {
                 block_dim = total_block_num < max_core_num ? total_block_num : max_core_num;
             } else {
                 block_dim = needed_core_num < max_core_num ? needed_core_num : max_core_num;

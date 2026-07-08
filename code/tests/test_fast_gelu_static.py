@@ -70,6 +70,12 @@ class FastGeluStaticTests(unittest.TestCase):
         ]:
             self.assertIn(token, kernel)
 
+    def test_host_uses_dtype_aware_large_core_threshold(self):
+        host = read(HOST)
+        self.assertIn("FLOAT_LARGE_CORE_THRESHOLD", host)
+        self.assertIn("HALF_LARGE_CORE_THRESHOLD", host)
+        self.assertIn("dtype_x == ge::DT_FLOAT16 ? HALF_LARGE_CORE_THRESHOLD : FLOAT_LARGE_CORE_THRESHOLD", host)
+
 
 if __name__ == "__main__":
     unittest.main()
