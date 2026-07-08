@@ -7,6 +7,26 @@
 constexpr int32_t BUFFER_NUM = 2;
 constexpr uint32_t TILE_ELEM_NUM = 8192;
 
+__simd_vf__ inline void FastGeluFloatVf(__ubuf__ float *xAddr, __ubuf__ float *yAddr,
+                                        uint32_t count, uint16_t loopNum) {
+    constexpr uint32_t vectorLength = AscendC::VECTOR_REG_WIDTH / sizeof(float);
+    AscendC::Reg::RegTensor<float> xReg;
+    AscendC::Reg::RegTensor<float> denomReg;
+    AscendC::Reg::RegTensor<float> yReg;
+    AscendC::Reg::MaskReg mask;
+
+    for (uint16_t i = 0; i < loopNum; ++i) {
+        mask = AscendC::Reg::UpdateMask<float>(count);
+        AscendC::Reg::LoadAlign(xReg, xAddr + i * vectorLength);
+        AscendC::Reg::Muls(denomReg, xReg, -1.702f, mask);
+        AscendC::Reg::Exp(denomReg, denomReg, mask);
+        AscendC::Reg::Adds(denomReg, denomReg, 1.0f, mask);
+        AscendC::Reg::Div(yReg, xReg, denomReg, mask);
+        AscendC::Reg::StoreAlign<float, AscendC::Reg::StoreDist::DIST_NORM_B32>(
+            yAddr + i * vectorLength, yReg, mask);
+    }
+}
+
 template <class DT_X>
 class KernelFastGelu {
 public:
@@ -89,12 +109,20 @@ private:
         AscendC::LocalTensor<DT_X> yLocal = outQueueY_.AllocTensor<DT_X>();
         AscendC::LocalTensor<DT_X> sigmoidLocal = sigmoidBuf_.Get<DT_X>();
 
-        AscendC::Muls(sigmoidLocal, xLocal, static_cast<DT_X>(1.702f), count);
-        AscendC::PipeBarrier<PIPE_V>();
-        AscendC::Sigmoid(sigmoidLocal, sigmoidLocal, count);
-        AscendC::PipeBarrier<PIPE_V>();
-        AscendC::Mul(yLocal, xLocal, sigmoidLocal, count);
-        AscendC::PipeBarrier<PIPE_V>();
+        if constexpr (AscendC::IsSameType<DT_X, float>::value) {
+            constexpr uint32_t vectorLength = AscendC::VECTOR_REG_WIDTH / sizeof(float);
+            uint16_t loopNum = static_cast<uint16_t>((count + vectorLength - 1) / vectorLength);
+            __ubuf__ float *xAddr = (__ubuf__ float *)xLocal.GetPhyAddr();
+            __ubuf__ float *yAddr = (__ubuf__ float *)yLocal.GetPhyAddr();
+            asc_vf_call<FastGeluFloatVf>(xAddr, yAddr, count, loopNum);
+        } else {
+            AscendC::Muls(sigmoidLocal, xLocal, static_cast<DT_X>(1.702f), count);
+            AscendC::PipeBarrier<PIPE_V>();
+            AscendC::Sigmoid(sigmoidLocal, sigmoidLocal, count);
+            AscendC::PipeBarrier<PIPE_V>();
+            AscendC::Mul(yLocal, xLocal, sigmoidLocal, count);
+            AscendC::PipeBarrier<PIPE_V>();
+        }
 
         outQueueY_.EnQue(yLocal);
         inQueueX_.FreeTensor(xLocal);
