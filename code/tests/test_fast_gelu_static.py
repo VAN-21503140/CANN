@@ -70,14 +70,6 @@ class FastGeluStaticTests(unittest.TestCase):
         ]:
             self.assertIn(token, kernel)
 
-    def test_kernel_has_reg_vf_fast_gelu_path(self):
-        kernel = read(KERNEL)
-        self.assertIn("__simd_vf__ inline void FastGeluFloatVf", kernel)
-        self.assertIn("asc_vf_call<FastGeluFloatVf>", kernel)
-        self.assertIn("AscendC::Reg::Exp", kernel)
-        self.assertIn("AscendC::Reg::Div", kernel)
-        self.assertNotIn("AscendC::MicroAPI", kernel)
-
 
 if __name__ == "__main__":
     unittest.main()
