@@ -43,7 +43,6 @@ public:
 
         pipe_.InitBuffer(inQueueX_, BUFFER_NUM, tileDataNum_ * sizeof(DT_X));
         pipe_.InitBuffer(outQueueY_, BUFFER_NUM, tileDataNum_ * sizeof(DT_X));
-        pipe_.InitBuffer(sigmoidBuf_, tileDataNum_ * sizeof(DT_X));
     }
     __aicore__ inline void Process() {
         if (totalLength_ == 0 || realCoreDataNum_ == 0 || tileNum_ == 0) {
@@ -87,13 +86,12 @@ private:
     __aicore__ inline void Compute(uint32_t count) {
         AscendC::LocalTensor<DT_X> xLocal = inQueueX_.DeQue<DT_X>();
         AscendC::LocalTensor<DT_X> yLocal = outQueueY_.AllocTensor<DT_X>();
-        AscendC::LocalTensor<DT_X> sigmoidLocal = sigmoidBuf_.Get<DT_X>();
 
-        AscendC::Muls(sigmoidLocal, xLocal, static_cast<DT_X>(1.702f), count);
+        AscendC::Muls(yLocal, xLocal, static_cast<DT_X>(1.702f), count);
         AscendC::PipeBarrier<PIPE_V>();
-        AscendC::Sigmoid(sigmoidLocal, sigmoidLocal, count);
+        AscendC::Sigmoid(yLocal, yLocal, count);
         AscendC::PipeBarrier<PIPE_V>();
-        AscendC::Mul(yLocal, xLocal, sigmoidLocal, count);
+        AscendC::Mul(yLocal, xLocal, yLocal, count);
         AscendC::PipeBarrier<PIPE_V>();
 
         outQueueY_.EnQue(yLocal);
@@ -126,7 +124,6 @@ private:
     AscendC::GlobalTensor<DT_X> yGm_;
     AscendC::TQue<AscendC::QuePosition::VECIN, BUFFER_NUM> inQueueX_;
     AscendC::TQue<AscendC::QuePosition::VECOUT, BUFFER_NUM> outQueueY_;
-    AscendC::TBuf<AscendC::TPosition::VECCALC> sigmoidBuf_;
 };
 
 template <typename DT_X>

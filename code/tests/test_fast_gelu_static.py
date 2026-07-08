@@ -57,6 +57,13 @@ class FastGeluStaticTests(unittest.TestCase):
         ]:
             self.assertIn(token, kernel)
 
+    def test_kernel_reuses_output_local_for_sigmoid_work_buffer(self):
+        kernel = read(KERNEL)
+        self.assertNotIn("sigmoidBuf_", kernel)
+        self.assertIn("Muls(yLocal, xLocal, static_cast<DT_X>(1.702f), count)", kernel)
+        self.assertIn("Sigmoid(yLocal, yLocal, count)", kernel)
+        self.assertIn("Mul(yLocal, xLocal, yLocal, count)", kernel)
+
     def test_kernel_uses_balanced_queues_and_local_buffers(self):
         kernel = read(KERNEL)
         for token in [
@@ -66,7 +73,6 @@ class FastGeluStaticTests(unittest.TestCase):
             "EnQue",
             "DeQue",
             "FreeTensor",
-            "TBuf",
         ]:
             self.assertIn(token, kernel)
 
