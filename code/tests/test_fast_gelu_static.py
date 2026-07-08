@@ -32,6 +32,15 @@ class FastGeluStaticTests(unittest.TestCase):
         self.assertIn("uint32_t tailBlockNum", tiling)
         self.assertIn("FastGeluTilingData", tiling)
 
+    def test_host_uses_segmented_small_input_core_policy(self):
+        host = read(HOST)
+        self.assertIn("SMALL_INPUT_THRESHOLD", host)
+        self.assertIn("SMALL_CORE_SPLIT_ELEM_NUM", host)
+        self.assertIn("MID_CORE_SPLIT_ELEM_NUM", host)
+        self.assertIn("GetCoreSplitElemNum(length_x)", host)
+        self.assertIn("needed_core_num = (length_x + core_split_elem_num - 1) / core_split_elem_num", host)
+        self.assertIn("length_x <= SMALL_INPUT_THRESHOLD", host)
+
     def test_kernel_splits_work_by_core_and_handles_empty_cores(self):
         kernel = read(KERNEL)
         self.assertIn("GetBlockIdx()", kernel)

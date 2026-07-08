@@ -7,6 +7,10 @@
 
 constexpr uint32_t BLOCK_SIZE = 32;
 constexpr uint32_t CORE_SPLIT_ELEM_NUM = 2048;
+constexpr uint32_t SMALL_INPUT_THRESHOLD = 1024;
+constexpr uint32_t MID_INPUT_THRESHOLD = CORE_SPLIT_ELEM_NUM * 2;
+constexpr uint32_t SMALL_CORE_SPLIT_ELEM_NUM = 1024;
+constexpr uint32_t MID_CORE_SPLIT_ELEM_NUM = 3072;
 constexpr uint32_t TILE_ELEM_NUM = 8192;
 constexpr uint32_t FLOAT_TILE_ELEM_NUM = 4096;
 constexpr uint32_t HALF_TILE_ELEM_NUM = 8192;
@@ -19,6 +23,16 @@ namespace optiling {
 
     static uint32_t GetTileElemNum(ge::DataType dtype) {
         return dtype == ge::DT_FLOAT16 ? HALF_TILE_ELEM_NUM : FLOAT_TILE_ELEM_NUM;
+    }
+
+    static uint32_t GetCoreSplitElemNum(uint32_t length_x) {
+        if (length_x <= SMALL_INPUT_THRESHOLD) {
+            return SMALL_CORE_SPLIT_ELEM_NUM;
+        }
+        if (length_x <= MID_INPUT_THRESHOLD) {
+            return CORE_SPLIT_ELEM_NUM;
+        }
+        return MID_CORE_SPLIT_ELEM_NUM;
     }
 
     static ge::graphStatus TilingFunc(gert::TilingContext *context) {
@@ -46,7 +60,8 @@ namespace optiling {
         uint32_t block_dim = 1U;
         if (total_block_num > 0) {
             uint32_t max_core_num = num_cores_aiv > 0 ? static_cast<uint32_t>(num_cores_aiv) : 1U;
-            uint32_t needed_core_num = (length_x + CORE_SPLIT_ELEM_NUM - 1) / CORE_SPLIT_ELEM_NUM;
+            uint32_t core_split_elem_num = GetCoreSplitElemNum(length_x);
+            uint32_t needed_core_num = (length_x + core_split_elem_num - 1) / core_split_elem_num;
             if (length_x > LARGE_CORE_THRESHOLD) {
                 block_dim = total_block_num < max_core_num ? total_block_num : max_core_num;
             } else {
