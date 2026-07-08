@@ -11,7 +11,7 @@ constexpr uint32_t TILE_ELEM_NUM = 8192;
 constexpr uint32_t FLOAT_TILE_ELEM_NUM = 4096;
 constexpr uint32_t HALF_TILE_ELEM_NUM = 8192;
 constexpr uint32_t VECTOR_CORE_CAP = 48;
-constexpr uint32_t SMALL_SHAPE_THRESHOLD = CORE_SPLIT_ELEM_NUM;
+constexpr uint32_t SMALL_SHAPE_BASE_THRESHOLD = CORE_SPLIT_ELEM_NUM * 24U;
 
 namespace optiling {
     static uint32_t CeilDiv(uint32_t value, uint32_t divisor) {
@@ -24,6 +24,10 @@ namespace optiling {
 
     static uint32_t GetTileElemNum(ge::DataType dtype) {
         return dtype == ge::DT_FLOAT16 ? HALF_TILE_ELEM_NUM : FLOAT_TILE_ELEM_NUM;
+    }
+
+    static uint32_t GetSmallShapeThreshold(ge::DataType dtype) {
+        return dtype == ge::DT_FLOAT16 ? SMALL_SHAPE_BASE_THRESHOLD * 2U : SMALL_SHAPE_BASE_THRESHOLD;
     }
 
     static uint32_t GetTargetCoreNum(uint32_t length_x, ge::DataType dtype) {
@@ -59,7 +63,8 @@ namespace optiling {
         uint32_t type_length = GetDataTypeSize(dtype_x);
 
         uint32_t DT_X = static_cast<uint32_t>(dtype_x);
-        uint32_t IS_SMALL_SHAPE = length_x > 0 && length_x <= SMALL_SHAPE_THRESHOLD ? 1U : 0U;
+        uint32_t small_shape_threshold = GetSmallShapeThreshold(dtype_x);
+        uint32_t IS_SMALL_SHAPE = length_x > 0 && length_x <= small_shape_threshold ? 1U : 0U;
         ASCENDC_TPL_SEL_PARAM(context, DT_X, IS_SMALL_SHAPE);
 
         FastGeluTilingData *tiling = context->GetTilingData<FastGeluTilingData>();

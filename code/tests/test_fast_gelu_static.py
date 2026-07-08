@@ -37,8 +37,13 @@ class FastGeluStaticTests(unittest.TestCase):
         host = read(HOST)
         self.assertIn("VECTOR_CORE_CAP = 48", host)
         self.assertIn("GetTargetCoreNum", host)
-        self.assertIn("SMALL_SHAPE_THRESHOLD = CORE_SPLIT_ELEM_NUM", host)
-        self.assertIn("IS_SMALL_SHAPE = length_x > 0 && length_x <= SMALL_SHAPE_THRESHOLD", host)
+        self.assertIn("SMALL_SHAPE_BASE_THRESHOLD = CORE_SPLIT_ELEM_NUM * 24U", host)
+        self.assertIn("GetSmallShapeThreshold", host)
+        self.assertIn(
+            "dtype == ge::DT_FLOAT16 ? SMALL_SHAPE_BASE_THRESHOLD * 2U : SMALL_SHAPE_BASE_THRESHOLD",
+            host,
+        )
+        self.assertIn("length_x <= small_shape_threshold", host)
         self.assertIn("ASCENDC_TPL_SEL_PARAM(context, DT_X, IS_SMALL_SHAPE)", host)
         self.assertIn("length_x <= CORE_SPLIT_ELEM_NUM * 3U", host)
         self.assertIn("length_x <= tile_elem_num * 4U", host)
