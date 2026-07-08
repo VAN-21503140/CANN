@@ -6,11 +6,11 @@ This repository tracks the FastGelu custom CANN operator solution and every impo
 
 Current best version:
 
-- Commit: `3779eab` / `manual_v10_segmented_aiv_core_policy`
-- CANNJudge submission: `86803`
+- Commit: `2ffc714` / `manual_v11_small_shape_tilingkey_tbuf`
+- CANNJudge submission: ranking record `2026/07/08 16:39:00`
 - Result: Pass `5/5`
-- Times: `4.18 / 3.36 / 6.32 / 6.48 / 7.64 us`
-- Sum: `27.98 us`
+- Times: `2.88 / 3.46 / 6.70 / 6.36 / 7.52 us`
+- Sum: `26.92 us`
 
 ## Version History
 
@@ -29,6 +29,7 @@ Current best version:
 | current commit | V8 remove final vector barrier | Kept V7 tiling and removed the final `PipeBarrier<PIPE_V>()` after `Mul` before `EnQue` | `86226` | `3.08 / 4.10 / 6.26 / 6.82 / 7.90` | `28.16` | Pass 5/5 |
 | current commit | V9 cap AIV cores at 24 | Kept the V8 kernel and capped host-side `max_core_num` at the physical AI Core count after confirming the judge machine has 24 AI Cores and 48 Vector units | `86658` | `3.26 / 4.36 / 6.22 / 6.32 / 7.88` | `28.04` | Pass 5/5 |
 | `3779eab` | V10 segmented AIV policy | Kept the V8 kernel, restored a 48-vector upper cap, and selected `1..3`, `8`, `12`, `16`, `24`, or `48` cores by dtype-aware tile ranges | `86803` | `4.18 / 3.36 / 6.32 / 6.48 / 7.64` | `27.98` | Pass 5/5 |
+| `2ffc714` | V11 small shape TilingKey path | Added an `IS_SMALL_SHAPE` specialization for `length <= 2048`: `blockDim=1`, one aligned local tile, direct `TBuf` CopyIn/FastGelu/CopyOut, while preserving the V10 path for medium and large shapes | ranking record `2026/07/08 16:39:00` | `2.88 / 3.46 / 6.70 / 6.36 / 7.52` | `26.92` | Pass 5/5 |
 
 Documentation and automation commits:
 
@@ -49,6 +50,7 @@ Main lessons so far:
 - The final vector barrier after `Mul` was not needed before `EnQue` for correctness on CANNJudge and removing it improved total runtime.
 - The judge hardware reports more AIV capacity than this operator should shard across. Capping host-side AIV cores at `24`, matching the physical AI Core count, beat uncapped V8 even though tests 1 and 2 became slower; tests 3, 4, and 5 improved enough to make the total best so far.
 - A segmented AIV policy beat the flat `24`-core cap slightly on submission `86803`. It regressed test 1 but improved tests 2 and 5 enough to reach `27.98 us`, so it is the current baseline for further experiments.
+- Small-shape specialization is the largest late-stage win. The V11 path avoids generic big/small core assignment, multi-tile looping, and TQue allocation for tiny tensors, cutting test 1 from `4.18 us` to `2.88 us` while keeping medium/large shapes on the V10 generalized path.
 - Based on the CANN performance skill, single copy chunks around `16KB` are a useful target:
   - float32 `4096` elements = `16KB`
   - float16 `8192` elements = `16KB`
