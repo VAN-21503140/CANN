@@ -34,6 +34,7 @@ Current best version:
 | uncommitted experiment | V12 dtype-aware 22U threshold | Same dtype-aware threshold rule as V12, but with fp32 `22U` and fp16 `44U`; lowering from `24U` lost the mid-size gains | `87023` | `2.82 / 3.36 / 6.84 / 6.94 / 8.14` | `28.10` | Pass 5/5 |
 | current commit | V12 dtype-aware 24U threshold | Uses the existing `DT_X + IS_SMALL_SHAPE` TilingKey shape, but judges the small path by dtype-aware work size: fp32 threshold is `CORE_SPLIT_ELEM_NUM * 24U`, fp16 threshold is doubled | `87010` | `2.46 / 3.68 / 6.10 / 6.74 / 7.50` | `26.48` | Pass 5/5 |
 | uncommitted experiment | V12 dtype-aware 26U threshold | Same dtype-aware threshold rule as V12, but with fp32 `26U` and fp16 `52U`; widening past `24U` regressed tests 3-5 | `87038` | `2.72 / 3.42 / 7.00 / 7.08 / 8.22` | `28.44` | Pass 5/5 |
+| uncommitted experiment | small aligned DataCopy TilingKey | Added a small-shape aligned TilingKey so 32B-aligned small tensors use `DataCopy` while unaligned tensors keep `DataCopyPad`; the extra specialization did not pay off | `87137` | `3.70 / 2.92 / 6.96 / 7.50 / 8.06` | `29.14` | Pass 5/5 |
 
 Documentation and automation commits:
 
@@ -56,6 +57,7 @@ Main lessons so far:
 - A segmented AIV policy beat the flat `24`-core cap slightly on submission `86803`. It regressed test 1 but improved tests 2 and 5 enough to reach `27.98 us`, so it is the current baseline for further experiments.
 - Small-shape specialization is the largest late-stage win. The V11 path avoids generic big/small core assignment, multi-tile looping, and TQue allocation for tiny tensors, cutting test 1 from `4.18 us` to `2.88 us` while keeping medium/large shapes on the V10 generalized path.
 - Raising the small-shape threshold can help mid-size tests but may hurt the largest point. Raw `16U` (`86963`) reached `27.14 us`, while dtype-aware `24U` (`87010`) currently gives the best recorded total at `26.48 us`: fp32 uses `CORE_SPLIT_ELEM_NUM * 24U`, and fp16 doubles that threshold to keep roughly equal byte/work size.
+- Splitting small shapes again by 32B alignment and using `DataCopy` for aligned cases was slower on submission `87137` (`29.14 us`), so the committed 24U path keeps the simpler small `DataCopyPad` implementation.
 - Based on the CANN performance skill, single copy chunks around `16KB` are a useful target:
   - float32 `4096` elements = `16KB`
   - float16 `8192` elements = `16KB`
