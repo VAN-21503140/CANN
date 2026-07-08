@@ -94,7 +94,6 @@ private:
         AscendC::Sigmoid(sigmoidLocal, sigmoidLocal, count);
         AscendC::PipeBarrier<PIPE_V>();
         AscendC::Mul(yLocal, xLocal, sigmoidLocal, count);
-        AscendC::PipeBarrier<PIPE_V>();
 
         outQueueY_.EnQue(yLocal);
         inQueueX_.FreeTensor(xLocal);
