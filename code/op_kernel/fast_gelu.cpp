@@ -7,28 +7,6 @@
 constexpr int32_t BUFFER_NUM = 2;
 constexpr uint32_t TILE_ELEM_NUM = 8192;
 
-__simd_vf__ inline void FastGeluFloatVf(__ubuf__ float *xAddr, __ubuf__ float *yAddr,
-                                        uint32_t count, uint16_t loopNum) {
-    constexpr uint32_t VECTOR_LENGTH = AscendC::VECTOR_REG_WIDTH / sizeof(float);
-    AscendC::MicroAPI::MaskReg mask;
-    AscendC::MicroAPI::RegTensor<float> xReg;
-    AscendC::MicroAPI::RegTensor<float> sigmoidReg;
-    AscendC::MicroAPI::RegTensor<float> yReg;
-    uint32_t remaining = count;
-
-    for (uint16_t i = 0; i < loopNum; ++i) {
-        mask = AscendC::MicroAPI::UpdateMask<float>(remaining);
-        AscendC::MicroAPI::DataCopy<float, AscendC::MicroAPI::LoadDist::DIST_NORM>(
-            xReg, xAddr + i * VECTOR_LENGTH);
-        AscendC::MicroAPI::Muls(sigmoidReg, xReg, 1.702f, mask);
-        AscendC::MicroAPI::Sigmoid(sigmoidReg, sigmoidReg, mask);
-        AscendC::MicroAPI::Mul(yReg, xReg, sigmoidReg, mask);
-        AscendC::MicroAPI::DataCopy<float, AscendC::MicroAPI::StoreDist::DIST_NORM_B32>(
-            yAddr + i * VECTOR_LENGTH, yReg, mask);
-        remaining = remaining > VECTOR_LENGTH ? remaining - VECTOR_LENGTH : 0;
-    }
-}
-
 template <class DT_X>
 class KernelFastGelu {
 public:
@@ -111,20 +89,12 @@ private:
         AscendC::LocalTensor<DT_X> yLocal = outQueueY_.AllocTensor<DT_X>();
         AscendC::LocalTensor<DT_X> sigmoidLocal = sigmoidBuf_.Get<DT_X>();
 
-        if constexpr (AscendC::IsSameType<DT_X, float>::value) {
-            constexpr uint32_t vectorLength = AscendC::VECTOR_REG_WIDTH / sizeof(float);
-            uint16_t loopNum = static_cast<uint16_t>((count + vectorLength - 1) / vectorLength);
-            __ubuf__ float *xAddr = (__ubuf__ float *)xLocal.GetPhyAddr();
-            __ubuf__ float *yAddr = (__ubuf__ float *)yLocal.GetPhyAddr();
-            asc_vf_call<FastGeluFloatVf>(xAddr, yAddr, count, loopNum);
-        } else {
-            AscendC::Muls(sigmoidLocal, xLocal, static_cast<DT_X>(1.702f), count);
-            AscendC::PipeBarrier<PIPE_V>();
-            AscendC::Sigmoid(sigmoidLocal, sigmoidLocal, count);
-            AscendC::PipeBarrier<PIPE_V>();
-            AscendC::Mul(yLocal, xLocal, sigmoidLocal, count);
-            AscendC::PipeBarrier<PIPE_V>();
-        }
+        AscendC::Muls(sigmoidLocal, xLocal, static_cast<DT_X>(1.702f), count);
+        AscendC::PipeBarrier<PIPE_V>();
+        AscendC::Sigmoid(sigmoidLocal, sigmoidLocal, count);
+        AscendC::PipeBarrier<PIPE_V>();
+        AscendC::Mul(yLocal, xLocal, sigmoidLocal, count);
+        AscendC::PipeBarrier<PIPE_V>();
 
         outQueueY_.EnQue(yLocal);
         inQueueX_.FreeTensor(xLocal);

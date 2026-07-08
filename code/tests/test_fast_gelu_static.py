@@ -70,12 +70,6 @@ class FastGeluStaticTests(unittest.TestCase):
         ]:
             self.assertIn(token, kernel)
 
-    def test_kernel_has_float32_vf_small_value_path(self):
-        kernel = read(KERNEL)
-        self.assertIn("__simd_vf__ inline void FastGeluFloatVf", kernel)
-        self.assertIn("asc_vf_call<FastGeluFloatVf>", kernel)
-        self.assertIn("AscendC::MicroAPI::Sigmoid", kernel)
-
 
 if __name__ == "__main__":
     unittest.main()
