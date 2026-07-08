@@ -11,6 +11,7 @@ constexpr uint32_t TILE_ELEM_NUM = 8192;
 constexpr uint32_t FLOAT_TILE_ELEM_NUM = 4096;
 constexpr uint32_t HALF_TILE_ELEM_NUM = 8192;
 constexpr uint32_t VECTOR_CORE_CAP = 48;
+constexpr uint32_t SMALL_SHAPE_THRESHOLD = CORE_SPLIT_ELEM_NUM;
 
 namespace optiling {
     static uint32_t CeilDiv(uint32_t value, uint32_t divisor) {
@@ -56,10 +57,10 @@ namespace optiling {
         ge::DataType dtype_x = tensor_x->GetDataType();
         uint32_t length_x = static_cast<uint32_t>(tensor_x->GetShapeSize());
         uint32_t type_length = GetDataTypeSize(dtype_x);
-        uint32_t tile_elem_num = GetTileElemNum(dtype_x);
 
         uint32_t DT_X = static_cast<uint32_t>(dtype_x);
-        ASCENDC_TPL_SEL_PARAM(context, DT_X);
+        uint32_t IS_SMALL_SHAPE = length_x > 0 && length_x <= SMALL_SHAPE_THRESHOLD ? 1U : 0U;
+        ASCENDC_TPL_SEL_PARAM(context, DT_X, IS_SMALL_SHAPE);
 
         FastGeluTilingData *tiling = context->GetTilingData<FastGeluTilingData>();
         tiling->totalLength = length_x;
@@ -70,9 +71,13 @@ namespace optiling {
                 ? 0U
                 : static_cast<uint32_t>(((input_length_bytes + BLOCK_SIZE - 1) / BLOCK_SIZE) * BLOCK_SIZE);
         uint32_t total_block_num = aligned_length_bytes / BLOCK_SIZE;
+        uint32_t tile_elem_num = GetTileElemNum(dtype_x);
+        if (IS_SMALL_SHAPE == 1U && total_block_num > 0) {
+            tile_elem_num = total_block_num * BLOCK_SIZE / type_length;
+        }
 
         uint32_t block_dim = 1U;
-        if (total_block_num > 0) {
+        if (total_block_num > 0 && IS_SMALL_SHAPE == 0U) {
             uint32_t max_core_num = num_cores_aiv > 0 ? static_cast<uint32_t>(num_cores_aiv) : 1U;
             if (max_core_num > VECTOR_CORE_CAP) {
                 max_core_num = VECTOR_CORE_CAP;

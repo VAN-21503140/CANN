@@ -6,6 +6,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 HOST = ROOT / "op_host" / "fast_gelu.cpp"
 KERNEL = ROOT / "op_kernel" / "fast_gelu.cpp"
 TILING = ROOT / "op_kernel" / "fast_gelu_tiling.h"
+KERNEL_KEY = ROOT / "op_kernel" / "tiling_key_fast_gelu.h"
 
 
 def read(path):
@@ -36,12 +37,31 @@ class FastGeluStaticTests(unittest.TestCase):
         host = read(HOST)
         self.assertIn("VECTOR_CORE_CAP = 48", host)
         self.assertIn("GetTargetCoreNum", host)
+        self.assertIn("SMALL_SHAPE_THRESHOLD = CORE_SPLIT_ELEM_NUM", host)
+        self.assertIn("IS_SMALL_SHAPE = length_x > 0 && length_x <= SMALL_SHAPE_THRESHOLD", host)
+        self.assertIn("ASCENDC_TPL_SEL_PARAM(context, DT_X, IS_SMALL_SHAPE)", host)
         self.assertIn("length_x <= CORE_SPLIT_ELEM_NUM * 3U", host)
         self.assertIn("length_x <= tile_elem_num * 4U", host)
         self.assertIn("length_x <= tile_elem_num * 8U", host)
         self.assertIn("length_x <= tile_elem_num * 16U", host)
         self.assertIn("length_x <= tile_elem_num * 48U", host)
         self.assertIn("block_dim = GetTargetCoreNum(length_x, dtype_x)", host)
+        self.assertIn("tile_elem_num = total_block_num * BLOCK_SIZE / type_length", host)
+        self.assertIn("total_block_num > 0 && IS_SMALL_SHAPE == 0U", host)
+
+    def test_tiling_key_has_small_shape_specialization(self):
+        key = read(KERNEL_KEY)
+        self.assertIn("ASCENDC_TPL_BOOL_DECL(IS_SMALL_SHAPE, 0, 1)", key)
+        self.assertIn("ASCENDC_TPL_BOOL_SEL(IS_SMALL_SHAPE, 0, 1)", key)
+
+    def test_kernel_has_small_direct_tbuf_path(self):
+        kernel = read(KERNEL)
+        self.assertIn("class KernelFastGeluSmall", kernel)
+        self.assertIn("TBuf<AscendC::TPosition::VECCALC> xBuf_", kernel)
+        self.assertIn("TBuf<AscendC::TPosition::VECCALC> yBuf_", kernel)
+        self.assertIn("template <typename DT_X, int IS_SMALL_SHAPE>", kernel)
+        self.assertIn("if (IS_SMALL_SHAPE == 1)", kernel)
+        self.assertIn("PipeBarrier<PIPE_ALL>()", kernel)
 
     def test_kernel_splits_work_by_core_and_handles_empty_cores(self):
         kernel = read(KERNEL)
