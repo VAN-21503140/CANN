@@ -32,6 +32,12 @@ class FastGeluStaticTests(unittest.TestCase):
         self.assertIn("uint32_t tailBlockNum", tiling)
         self.assertIn("FastGeluTilingData", tiling)
 
+    def test_host_can_cap_aiv_core_count_for_experiments(self):
+        host = read(HOST)
+        self.assertIn("AIV_CORE_CAP", host)
+        self.assertIn("if (max_core_num > AIV_CORE_CAP)", host)
+        self.assertIn("max_core_num = AIV_CORE_CAP", host)
+
     def test_kernel_splits_work_by_core_and_handles_empty_cores(self):
         kernel = read(KERNEL)
         self.assertIn("GetBlockIdx()", kernel)
